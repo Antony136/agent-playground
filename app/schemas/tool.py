@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Any
+from typing import Any, Callable
 
 
 class ToolParameter(BaseModel):
@@ -13,3 +13,17 @@ class ToolSchema(BaseModel):
     name: str
     description: str
     parameters: list[ToolParameter]
+
+
+class ToolDefinition:
+    def __init__(
+        self,
+        schema: ToolSchema,
+        function: Callable[..., Any],
+    ):
+        self.schema = schema
+        self.function = function
+
+    @property
+    def name(self) -> str:
+        return self.schema.name
