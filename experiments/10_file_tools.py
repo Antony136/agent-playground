@@ -5,13 +5,12 @@ from app.tools.default_tools import create_tool_registry
 
 def main():
     registry = create_tool_registry()
-
     executor = ToolExecutor(registry)
 
     agent = AgentLoop(executor)
 
     answer = agent.run(
-        "Calculate 125 multiplied by 48, then add 250."
+        "Read app/tools/calculator.py and tell me what operations the calculator supports."
     )
 
     print("\nFinal answer:")

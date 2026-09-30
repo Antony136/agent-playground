@@ -30,12 +30,16 @@ def read_file(file_path: str) -> str:
 
 
 def write_file(file_path: str, content: str) -> str:
-    path = Path(file_path)
+    path = Path(file_path).resolve()
 
-    path.write_text(
-        content,
-        encoding="utf-8",
-    )
+    workspace = Path("agent_workspace").resolve()
+
+    if workspace not in path.parents:
+        raise PermissionError(
+            "File modification is only allowed inside agent_workspace."
+        )
+
+    path.write_text(content, encoding="utf-8")
 
     return f"File written successfully: {file_path}"
 

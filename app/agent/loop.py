@@ -2,6 +2,7 @@ from ollama import chat
 from pydantic import BaseModel
 
 from app.agent.executor import ToolExecutor
+from app.agent.state import AgentState
 
 
 MODEL = "qwen2.5-coder:7b"
@@ -16,69 +17,7 @@ class AgentLoop:
     def __init__(self, executor: ToolExecutor):
         self.executor = executor
 
-    def ask_llm(
-        self,
-        user_request: str,
-        tool_result: str | None = None,
-    ) -> AgentDecision:
-
-        messages = [
-            {
-                "role": "system",
-                "content": """
-You are an AI agent.
-
-You have access to these actions:
-
-1. calculator
-   Use this for arithmetic calculations.
-
-2. final_answer
-   Use this when you can provide the final answer to the user.
-
-For calculator requests, return:
-
-{
-    "action": "calculator",
-    "arguments": {
-        "operation": "add | subtract | multiply | divide",
-        "numbers": [number1, number2, ...]
-    }
-}
-
-When you have enough information to answer the user, return:
-
-{
-    "action": "final_answer",
-    "arguments": {
-        "answer": "your final answer"
-    }
-}
-
-Return only the structured response.
-""",
-            },
-            {
-                "role": "user",
-                "content": user_request,
-            },
-        ]
-
-        if tool_result is not None:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": f"""
-The tool returned this result:
-
-{tool_result}
-
-Now decide what to do next.
-If the task is complete, return final_answer.
-""",
-                }
-            )
-
+    def ask_llm(self, messages: list[dict]) -> AgentDecision:
         response = chat(
             model=MODEL,
             messages=messages,
@@ -90,15 +29,102 @@ If the task is complete, return final_answer.
         )
 
     def run(self, user_request: str) -> str:
+        state = AgentState(
+            user_request=user_request,
+            messages=[
+                {
+                    "role": "system",
+                    "content": """
+You are an AI developer agent.
 
-        tool_result = None
+You have access to these actions:
+
+calculator
+- Perform arithmetic calculations.
+
+list_files
+- List files inside a directory.
+
+read_file
+- Read the contents of a text file.
+
+search_files
+- Search files recursively for text.
+
+final_answer
+- Use this when the user's task is complete.
+
+For calculator requests, return:
+
+{
+    "action": "calculator",
+    "arguments": {
+        "operation": "add | subtract | multiply | divide",
+        "numbers": [number1, number2, ...]
+    }
+}
+
+For list_files:
+
+{
+    "action": "list_files",
+    "arguments": {
+        "directory": "directory path"
+    }
+}
+
+For read_file:
+
+{
+    "action": "read_file",
+    "arguments": {
+        "file_path": "file path"
+    }
+}
+
+For search_files:
+
+{
+    "action": "search_files",
+    "arguments": {
+        "directory": "directory path",
+        "query": "text to search for"
+    }
+}
+
+When the task is complete, return:
+
+{
+    "action": "final_answer",
+    "arguments": {
+        "answer": "your final answer"
+    }
+}
+
+You may perform multiple tool calls.
+
+Use results from previous tool calls when necessary.
+
+Return only the structured response.
+""",
+                },
+                {
+                    "role": "user",
+                    "content": user_request,
+                },
+            ],
+        )
 
         while True:
+            state.iteration += 1
 
-            decision = self.ask_llm(
-                user_request=user_request,
-                tool_result=tool_result,
-            )
+            decision = self.ask_llm(state.messages)
+
+            state.current_action = decision.action
+
+            print("\nAgent state:")
+            print(f"Iteration: {state.iteration}")
+            print(f"Current action: {state.current_action}")
 
             print("\nAgent decision:")
             print(decision)
@@ -106,15 +132,39 @@ If the task is complete, return final_answer.
             if decision.action == "final_answer":
                 return decision.arguments["answer"]
 
-            tool_result = self.executor.execute(
+            result = self.executor.execute(
                 tool_name=decision.action,
                 arguments=decision.arguments,
             )
 
             print("\nTool result:")
-            print(tool_result)
+            print(result)
 
-            if not tool_result.success:
-                return f"Tool execution failed: {tool_result.error}"
+            if not result.success:
+                return f"Tool execution failed: {result.error}"
 
-            tool_result = str(tool_result.result)
+            state.tool_results.append(str(result.result))
+
+            state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": decision.model_dump_json(),
+                }
+            )
+
+            state.messages.append(
+                {
+                    "role": "user",
+                    "content": f"""
+The tool `{decision.action}` returned:
+
+{result.result}
+
+Use this result to continue the task.
+
+If another tool is needed, call it.
+
+If the task is complete, return final_answer.
+""",
+                }
+            )
