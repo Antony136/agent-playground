@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from app.agent.executor import ToolExecutor
 from app.agent.state import AgentState
+from app.agent.observability import AgentTracer
 
 
 MODEL = "qwen2.5-coder:7b"
@@ -14,8 +15,13 @@ class AgentDecision(BaseModel):
 
 
 class AgentLoop:
-    def __init__(self, executor: ToolExecutor):
+    def __init__(
+        self,
+        executor: ToolExecutor,
+        tracer: AgentTracer | None = None,
+    ):
         self.executor = executor
+        self.tracer = tracer or AgentTracer()
 
     def ask_llm(self, messages: list[dict]) -> AgentDecision:
         response = chat(
@@ -35,9 +41,9 @@ class AgentLoop:
                 {
                     "role": "system",
                     "content": """
-You are an AI developer agent.
+You are an AI agent.
 
-You have access to these actions:
+You can use these actions:
 
 calculator
 - Perform arithmetic calculations.
@@ -46,7 +52,7 @@ list_files
 - List files inside a directory.
 
 read_file
-- Read the contents of a text file.
+- Read a text file.
 
 search_files
 - Search files recursively for text.
@@ -58,9 +64,15 @@ search_knowledge_base
 - Search the knowledge base for relevant information.
 
 final_answer
-- Use this when the user's task is complete.
+- Return the final answer when the task is complete.
 
-For calculator requests, return:
+If a tool returns an error:
+- Analyze the error.
+- If possible, correct the arguments and retry.
+- If another tool can solve the problem, use it.
+- If the problem cannot be solved, return a final answer explaining the issue.
+
+For calculator:
 
 {
     "action": "calculator",
@@ -75,7 +87,7 @@ For list_files:
 {
     "action": "list_files",
     "arguments": {
-        "directory": "directory path"
+        "directory": "path"
     }
 }
 
@@ -84,7 +96,7 @@ For read_file:
 {
     "action": "read_file",
     "arguments": {
-        "file_path": "file path"
+        "file_path": "path"
     }
 }
 
@@ -93,8 +105,8 @@ For search_files:
 {
     "action": "search_files",
     "arguments": {
-        "directory": "directory path",
-        "query": "text to search for"
+        "directory": "path",
+        "query": "text"
     }
 }
 
@@ -117,7 +129,7 @@ For search_knowledge_base:
     }
 }
 
-When the task is complete, return:
+When the task is complete:
 
 {
     "action": "final_answer",
@@ -125,10 +137,6 @@ When the task is complete, return:
         "answer": "your final answer"
     }
 }
-
-You may perform multiple tool calls.
-
-Use results from previous tool calls when necessary.
 
 Return only the structured response.
 """,
@@ -140,11 +148,19 @@ Return only the structured response.
             ],
         )
 
-        while True:
+        self.tracer.record(
+            "agent_started",
+            {
+                "user_request": user_request,
+            },
+        )
+
+        max_iterations = 10
+
+        while state.iteration < max_iterations:
             state.iteration += 1
 
             decision = self.ask_llm(state.messages)
-
             state.current_action = decision.action
 
             print("\nAgent state:")
@@ -154,8 +170,36 @@ Return only the structured response.
             print("\nAgent decision:")
             print(decision)
 
+            self.tracer.record(
+                "llm_decision",
+                {
+                    "iteration": state.iteration,
+                    "action": decision.action,
+                    "arguments": decision.arguments,
+                },
+            )
+
             if decision.action == "final_answer":
-                return decision.arguments["answer"]
+                answer = decision.arguments["answer"]
+
+                self.tracer.record(
+                    "agent_completed",
+                    {
+                        "answer": answer,
+                        "iterations": state.iteration,
+                    },
+                )
+
+                return answer
+
+            self.tracer.record(
+                "tool_started",
+                {
+                    "tool": decision.action,
+                    "arguments": decision.arguments,
+                    "iteration": state.iteration,
+                },
+            )
 
             result = self.executor.execute(
                 tool_name=decision.action,
@@ -165,11 +209,6 @@ Return only the structured response.
             print("\nTool result:")
             print(result)
 
-            if not result.success:
-                return f"Tool execution failed: {result.error}"
-
-            state.tool_results.append(str(result.result))
-
             state.messages.append(
                 {
                     "role": "assistant",
@@ -177,19 +216,67 @@ Return only the structured response.
                 }
             )
 
-            state.messages.append(
-                {
-                    "role": "user",
-                    "content": f"""
+            if result.success:
+                self.tracer.record(
+                    "tool_completed",
+                    {
+                        "tool": decision.action,
+                        "result": str(result.result),
+                        "iteration": state.iteration,
+                    },
+                )
+
+                state.tool_results.append(str(result.result))
+
+                state.messages.append(
+                    {
+                        "role": "user",
+                        "content": f"""
 The tool `{decision.action}` returned:
 
 {result.result}
 
 Use this result to continue the task.
-
 If another tool is needed, call it.
-
 If the task is complete, return final_answer.
 """,
-                }
-            )
+                    }
+                )
+
+            else:
+                self.tracer.record(
+                    "tool_failed",
+                    {
+                        "tool": decision.action,
+                        "error": result.error,
+                        "iteration": state.iteration,
+                    },
+                )
+
+                state.messages.append(
+                    {
+                        "role": "user",
+                        "content": f"""
+The tool `{decision.action}` failed.
+
+Error:
+{result.error}
+
+Analyze this error carefully.
+
+If you can fix the problem, retry with corrected arguments.
+If another tool can solve the problem, use that tool.
+If the task cannot be completed, return final_answer explaining why.
+""",
+                    }
+                )
+
+        self.tracer.record(
+            "agent_stopped",
+            {
+                "reason": "maximum_iterations_reached",
+                "iterations": state.iteration,
+            },
+        )
+
+        return "The agent stopped because it reached the maximum number of iterations."
