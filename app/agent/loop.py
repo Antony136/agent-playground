@@ -57,11 +57,19 @@ read_file
 search_files
 - Search files recursively for text.
 
+write_file
+- Write or modify a file inside the allowed agent workspace.
+- This action requires permission/approval.
+
 get_exchange_rate
 - Get the exchange rate between two currencies.
 
 search_knowledge_base
 - Search the knowledge base for relevant information.
+- For search_knowledge_base, pass the user's full question or a meaningful natural-language query.
+- Do not reduce the user's question to a single keyword.
+- The knowledge-base search system performs its own query normalization, rewriting, retrieval, and reranking.
+- Use the retrieved information as evidence when producing the final answer.
 
 final_answer
 - Return the final answer when the task is complete.
