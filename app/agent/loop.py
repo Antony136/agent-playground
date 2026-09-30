@@ -51,6 +51,12 @@ read_file
 search_files
 - Search files recursively for text.
 
+get_exchange_rate
+- Get the exchange rate between two currencies.
+
+search_knowledge_base
+- Search the knowledge base for relevant information.
+
 final_answer
 - Use this when the user's task is complete.
 
@@ -89,6 +95,25 @@ For search_files:
     "arguments": {
         "directory": "directory path",
         "query": "text to search for"
+    }
+}
+
+For get_exchange_rate:
+
+{
+    "action": "get_exchange_rate",
+    "arguments": {
+        "base_currency": "USD",
+        "target_currency": "EUR"
+    }
+}
+
+For search_knowledge_base:
+
+{
+    "action": "search_knowledge_base",
+    "arguments": {
+        "query": "your search query"
     }
 }
 

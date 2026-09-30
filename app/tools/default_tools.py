@@ -17,6 +17,12 @@ from app.tools.file_tool_schemas import (
     search_files_schema,
 )
 
+from app.tools.api_tools import get_exchange_rate
+from app.tools.api_tool_schemas import exchange_rate_schema
+
+from app.tools.rag_tool import search_knowledge_base
+from app.tools.rag_tool_schema import search_knowledge_base_schema
+
 from app.tools.registry import ToolRegistry
 
 
@@ -58,4 +64,18 @@ def create_tool_registry() -> ToolRegistry:
         )
     )
 
+    registry.register(
+        ToolDefinition(
+            schema=exchange_rate_schema,
+            function=get_exchange_rate,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            schema=search_knowledge_base_schema,
+            function=search_knowledge_base,
+        )
+    )
+    
     return registry

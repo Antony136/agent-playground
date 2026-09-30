@@ -5,6 +5,8 @@ class PermissionManager:
             "list_files",
             "read_file",
             "search_files",
+            "get_exchange_rate",
+            "search_knowledge_base",
         }
 
         self.approval_required_tools = {
